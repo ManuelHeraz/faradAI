@@ -352,48 +352,124 @@ client.on('interactionCreate', async interaction => {
     // COMANDO 1: /articulo
     // ========================================================
     if (interaction.commandName === 'articulo') {
-        // ... (Mantén tu código actual de /articulo aquí adentro) ...
+        try {
+            // 1. Diferir Inmediatamente (VITAL para evitar el error "La aplicación no respondió")
+            await interaction.deferReply();
+
+            const temaSeleccionado = interaction.options.getString('tema');
+            const revistaSeleccionada = interaction.options.getString('revista');
+
+            let config;
+            if (temaSeleccionado === 'Gerociencia') config = categoriasMinado[0];
+            else if (temaSeleccionado === 'Metodos') config = categoriasMinado[1];
+            else if (temaSeleccionado === 'Filosofia') config = categoriasMinado[2];
+
+            let queryUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${config.query}`;
+            
+            if (revistaSeleccionada) {
+                queryUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=(JOURNAL:"${revistaSeleccionada}")`;
+            }
+            
+            queryUrl += ` AND (FIRST_PDATE:[NOW-30DAYS TO NOW])&format=json&resultType=core&pageSize=25`;
+            
+            // 2. Codificamos la URL para que no falle en los servidores Linux de Render
+            const urlSegura = encodeURI(queryUrl);
+
+            const respuesta = await fetch(urlSegura);
+            const datos = await respuesta.json();
+            let articulos = datos.resultList?.result || [];
+
+            articulos = articulos.filter(paper => 
+                !papersVistos.has(paper.id) && 
+                paper.abstractText && 
+                paper.abstractText !== 'Abstract no disponible'
+            );
+
+            if (articulos.length === 0) {
+                return interaction.editReply(`No encontré papers nuevos o con abstract disponible para esa categoría/revista. Intenta con otro parámetro o espera a que se publiquen más.`);
+            }
+
+            const indiceAleatorio = Math.floor(Math.random() * articulos.length);
+            const paperElegido = articulos[indiceAleatorio];
+            
+            papersVistos.add(paperElegido.id);
+
+            const doi = paperElegido.doi || 'DOI no disponible';
+            const abstract = paperElegido.abstractText;
+            const revista = paperElegido.journalTitle;
+
+            const promptEvaluacion = `
+            Lee el siguiente abstract.
+            ${config.instruccionIA}
+            No incluyas el título en tu respuesta.
+            Abstract original: ${abstract}
+            `;
+
+            const result = await model.generateContent(promptEvaluacion);
+            const analisisIA = result.response.text();
+
+            const mensajeDiscord = `📰 **Exploración Aleatoria: ${revista}**\n**DOI:** https://doi.org/${doi}\n\n${analisisIA}`;
+            
+            if (mensajeDiscord.length > 2000) {
+                const chunks = mensajeDiscord.match(/[\s\S]{1,1950}(?!\S)/g) || [mensajeDiscord];
+                await interaction.editReply(chunks[0]);
+                for (let i = 1; i < chunks.length; i++) {
+                    await interaction.followUp(chunks[i]);
+                }
+            } else {
+                await interaction.editReply(mensajeDiscord);
+            }
+
+        } catch (error) {
+            console.error('Error al ejecutar el comando /articulo:', error);
+            // Verificamos si logramos diferir la respuesta antes del error
+            if (interaction.deferred) {
+                await interaction.editReply('Ocurrió un error en el servidor al intentar extraer el paper.');
+            } else {
+                await interaction.reply({ content: 'Ocurrió un error grave antes de poder procesar la solicitud.', ephemeral: true });
+            }
+        }
     }
 
     // ========================================================
     // COMANDO 2: /actualizaciones
     // ========================================================
     if (interaction.commandName === 'actualizaciones') {
-        await interaction.deferReply();
-        const herramientaSeleccionada = interaction.options.getString('herramienta');
-
-        // MODO 1: Escaneo Rápido (Sin seleccionar herramienta)
-        if (!herramientaSeleccionada) {
-            let actualizadas = [];
-            
-            for (const h of repositoriosGitHub) {
-                try {
-                    const req = await fetch(`https://api.github.com/repos/${h.repo}/releases/latest`, {
-                        headers: { 'User-Agent': 'FaradAI-Bioinfo-Bot' }
-                    });
-                    if (!req.ok) continue;
-                    
-                    const data = await req.json();
-                    const dias = (new Date() - new Date(data.published_at)) / (1000 * 60 * 60 * 24);
-                    
-                    if (dias <= 7) actualizadas.push(h.nombre);
-                } catch (e) {
-                    console.error(`Error al revisar ${h.nombre}:`, e);
-                }
-            }
-
-            if (actualizadas.length > 0) {
-                await interaction.editReply(`🔔 **Actualizaciones detectadas (últimos 7 días):** ${actualizadas.join(', ')}.\nUsa \`/actualizaciones herramienta:[Nombre]\` para ver los detalles.`);
-            } else {
-                await interaction.editReply('✅ Todo tu ecosistema está al día. No hay actualizaciones en la última semana.');
-            }
-            return; // Terminamos la ejecución
-        }
-
-        // MODO 2: Detalle con Gemini (Herramienta seleccionada del menú)
-        const herramienta = repositoriosGitHub.find(x => x.nombre === herramientaSeleccionada);
-        
         try {
+            await interaction.deferReply();
+            const herramientaSeleccionada = interaction.options.getString('herramienta');
+
+            // MODO 1: Escaneo Rápido (Sin seleccionar herramienta)
+            if (!herramientaSeleccionada) {
+                let actualizadas = [];
+                
+                for (const h of repositoriosGitHub) {
+                    try {
+                        const req = await fetch(`https://api.github.com/repos/${h.repo}/releases/latest`, {
+                            headers: { 'User-Agent': 'FaradAI-Bioinfo-Bot' }
+                        });
+                        if (!req.ok) continue;
+                        
+                        const data = await req.json();
+                        const dias = (new Date() - new Date(data.published_at)) / (1000 * 60 * 60 * 24);
+                        
+                        if (dias <= 7) actualizadas.push(h.nombre);
+                    } catch (e) {
+                        console.error(`Error al revisar ${h.nombre}:`, e);
+                    }
+                }
+
+                if (actualizadas.length > 0) {
+                    await interaction.editReply(`🔔 **Actualizaciones detectadas (últimos 7 días):** ${actualizadas.join(', ')}.\nUsa \`/actualizaciones herramienta:[Nombre]\` para ver los detalles.`);
+                } else {
+                    await interaction.editReply('✅ Todo tu ecosistema está al día. No hay actualizaciones en la última semana.');
+                }
+                return; 
+            }
+
+            // MODO 2: Detalle con Gemini (Herramienta seleccionada del menú)
+            const herramienta = repositoriosGitHub.find(x => x.nombre === herramientaSeleccionada);
+            
             const req = await fetch(`https://api.github.com/repos/${herramienta.repo}/releases/latest`, {
                 headers: { 'User-Agent': 'FaradAI-Bioinfo-Bot' }
             });
@@ -420,7 +496,7 @@ client.on('interactionCreate', async interaction => {
             `;
 
             const result = await model.generateContent(promptEvaluacion);
-            const analisisIA = await result.response.text();
+            const analisisIA = result.response.text();
 
             const mensajeDiscord = `🚀 **Reporte de Versión: ${herramienta.nombre} (${version})**\n**Enlace:** ${link}\n\n${analisisIA}`;
 
@@ -436,7 +512,9 @@ client.on('interactionCreate', async interaction => {
 
         } catch (error) {
             console.error('Error en /actualizaciones detalle:', error);
-            await interaction.editReply('Ocurrió un error al consultar GitHub o procesar con Gemini.');
+            if (interaction.deferred) {
+                await interaction.editReply('Ocurrió un error al consultar GitHub o procesar con Gemini.');
+            }
         }
     }
 });
