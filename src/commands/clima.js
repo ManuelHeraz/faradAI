@@ -32,7 +32,6 @@ module.exports = {
             const cp = interaction.options.getString('codigo_postal');
             const apiKey = process.env.WEATHER_API_KEY;
             
-            // Usamos "CP, Mexico" para asegurar que WeatherAPI no se confunda con otros países
             const url = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${cp}, Mexico&days=3&aqi=no&alerts=yes&lang=es`;
             
             const respuesta = await fetch(url);
@@ -42,9 +41,9 @@ module.exports = {
             
             const weatherData = await respuesta.json();
 
-            // 1. CONDENSAR LA TELEMETRÍA (Para no ahogar a Gemini con datos inútiles)
+            // 1. CONDENSAR LA TELEMETRÍA (Ahora incluyendo UV y Sensación Térmica)
             let reporteCrudo = `Ubicación detectada: ${weatherData.location.name}, ${weatherData.location.region}\n`;
-            reporteCrudo += `Condiciones Actuales: ${weatherData.current.temp_c}°C, ${weatherData.current.condition.text}. Lluvia: ${weatherData.current.precip_mm} mm/h. Viento: ${weatherData.current.wind_kph} kph.\n\n`;
+            reporteCrudo += `Condiciones Actuales: Temp ${weatherData.current.temp_c}°C (Sensación: ${weatherData.current.feelslike_c}°C), ${weatherData.current.condition.text}. Lluvia: ${weatherData.current.precip_mm} mm/h. Viento: ${weatherData.current.wind_kph} kph. Índice UV: ${weatherData.current.uv}.\n\n`;
 
             const horasAAnalizar = modalidad === 'realtime' ? 12 : 48;
             let horasContadas = 0;
@@ -56,39 +55,39 @@ module.exports = {
             for (const dia of weatherData.forecast.forecastday) {
                 for (const hora of dia.hour) {
                     if (hora.time_epoch >= horaActualEpoch && horasContadas < horasAAnalizar) {
-                        reporteCrudo += `[${hora.time.split(' ')[1]}] Temp: ${hora.temp_c}°C | Lluvia: ${hora.precip_mm} mm/h (Prob: ${hora.chance_of_rain}%) | Truenos: Prob ${hora.chance_of_snow}%\n`;
+                        reporteCrudo += `[${hora.time.split(' ')[1]}] Temp: ${hora.temp_c}°C (Sensación: ${hora.feelslike_c}°C) | Lluvia: ${hora.precip_mm} mm/h | Viento: ${hora.wind_kph} kph | UV: ${hora.uv}\n`;
                         horasContadas++;
                     }
                 }
             }
 
-            // 2. EL CEREBRO DEL ASISTENTE (El Prompt adaptado a decisiones diarias)
+            // 2. EL CEREBRO DEL ASISTENTE (Ajustado para sol, calor y viento)
             let instruccionEstrategica = "";
             if (modalidad === 'realtime') {
                 instruccionEstrategica = `
                 El usuario necesita un "Nowcast" práctico. Analiza la telemetría hora por hora.
-                Si está lloviendo o va a llover, dime exactamente en qué horas, si aligerará y cuándo parará.
-                Dale recomendaciones directas: si debe esperar a que pase la lluvia para salir, si basta con un paraguas, si necesita calzado impermeable, o si es una ventana de tiempo segura para salir a pasear.`;
+                Dale recomendaciones directas: si debe esperar a que pase la lluvia o baje el sol extremo para salir, si basta con un paraguas, si el sol/calor hará que el traslado sea sofocante, o si es una ventana de tiempo fresca y segura para salir a pasear a Gala.`;
             } else {
                 instruccionEstrategica = `
                 El usuario necesita el pronóstico estratégico de 48 horas para planificar sus días.
-                Destaca las temperaturas máximas y mínimas con sus horarios exactos de aparición.
-                Menciona si hay ventanas de tormentas eléctricas o lluvias sostenidas, mucho sol o nublado para que el usuario planifique sus traslados rumbo a cualquier actividad prolongada en el exterior.`;
+                Destaca las temperaturas máximas (y su sensación térmica) y mínimas con sus horarios exactos de aparición.
+                Menciona si hay ventanas de tormentas, mucho sol (UV alto) o viento pesado para que el usuario planifique sus traslados rumbo a Cinvestav Sede Sur o cualquier actividad prolongada en el exterior.`;
             }
 
             const promptClima = `
             Eres FaradAI, el asistente meteorológico personal y altamente analítico del usuario. Has recibido la siguiente telemetría meteorológica cruda del radar.
             Tu objetivo es procesarla y darle un reporte directo, claro y orientado a la toma de decisiones diarias.
             
-            Reglas de intensidad de lluvia para tus recomendaciones:
-            - 0 mm/h = Despejado o nublado sin precipitaciones.
-            - 0.1 a 2.5 mm/h = Llovizna ligera. Bastará con un rompevientos o paraguas.
-            - 2.6 a 10 mm/h = Lluvia moderada a fuerte. Requiere paraguas, botas/calzado para lluvia y precaución.
-            - Más de 10 mm/h = Tormenta o aguacero pesado. Sugiere fuertemente retrasar salidas y resguardarse.
+            Reglas para tus recomendaciones:
+            - Lluvia 0.1 a 2.5 mm/h = Llovizna ligera. Bastará con rompevientos o paraguas.
+            - Lluvia > 2.5 mm/h = Lluvia moderada a fuerte. Requiere paraguas, calzado impermeable y precaución.
+            - Índice UV 6 a 10+ = Sol intenso/extremo. Recomienda usar bloqueador, gafas, o advertir que el traslado se sentirá pesado por el sol directo.
+            - Sensación Térmica > 28°C = Traslado caluroso y sofocante.
+            - Viento > 25 kph = Viento moderado a fuerte, menciónalo si es relevante.
 
             ${instruccionEstrategica}
 
-            Mantén un tono profesional, útil y conversacional.
+            Mantén un tono profesional, útil y conversacional. No incluyas información técnica excesiva, ve al punto.
             
             TELEMETRÍA CRUDA:
             ${reporteCrudo}
@@ -100,7 +99,6 @@ module.exports = {
 
             const mensajeDiscord = `☁️ **Reporte Meteorológico - Sector ${cp}**\n\n${analisisClima}`;
 
-            // Partimos el mensaje si es muy largo
             if (mensajeDiscord.length > 2000) {
                 const chunks = mensajeDiscord.match(/[\s\S]{1,1950}(?!\S)/g) || [mensajeDiscord];
                 await interaction.editReply(chunks[0]);
