@@ -6,9 +6,9 @@ module.exports = {
         description: 'Nowcasting de 60 minutos. Ventanas de escape y recomendaciones de vestimenta.',
         options: [
             {
-                name: 'codigo_postal',
+                name: 'ubicacion',
                 type: 3, // STRING
-                description: 'Código postal (Ej. 14370 para la zona de Cinvestav Sur)',
+                description: 'Coordenadas (Ej: 19.28,-99.13) o Código Postal',
                 required: true
             }
         ]
@@ -17,81 +17,86 @@ module.exports = {
     async execute(interaction) {
         try {
             await interaction.deferReply();
-            const cp = interaction.options.getString('codigo_postal');
+            const ubicacion = interaction.options.getString('ubicacion');
             const apiKey = process.env.TOMORROW_API_KEY;
 
             if (!apiKey) {
                 return interaction.editReply('❌ Falta la llave TOMORROW_API_KEY en el archivo .env');
             }
 
-            // Llamada a la API de Tomorrow.io
-            const url = `https://api.tomorrow.io/v4/weather/forecast?location=${cp}%20Mexico&timesteps=1m&units=metric&apikey=${apiKey}`;
+            // LÓGICA DE GEOLOCALIZACIÓN: Si tiene una coma, asumimos que son coordenadas exactas.
+            // Si no tiene coma, asumimos que es CP y forzamos "CDMX, Mexico" para evitar que la API se pierda.
+            let queryLocation = ubicacion;
+            if (!ubicacion.includes(',')) {
+                queryLocation = `${ubicacion}, CDMX, Mexico`;
+            }
+
+            // Codificamos la URL para evitar errores con espacios o comas
+            const url = `https://api.tomorrow.io/v4/weather/forecast?location=${encodeURIComponent(queryLocation)}&timesteps=1m&units=metric&apikey=${apiKey}`;
             
             const respuesta = await fetch(url);
             if (!respuesta.ok) {
-                return interaction.editReply('❌ No pude acceder al radar Doppler de Tomorrow.io. Verifica el código postal o tu API Key.');
+                return interaction.editReply('❌ No pude acceder al radar Doppler. Verifica las coordenadas o tu API Key.');
             }
 
             const data = await respuesta.json();
             const minutely = data.timelines?.minutely;
 
             if (!minutely || minutely.length === 0) {
-                return interaction.editReply('❌ El radar no reporta datos minuto a minuto para esta ubicación en este momento.');
+                return interaction.editReply('❌ El radar no reporta datos minuto a minuto para esta ubicación.');
             }
 
-            // 1. EXTRAER CONDICIONES BASE (Del minuto cero)
+            // 1. EXTRAER CONDICIONES BASE
             const condicionesActuales = minutely[0].values;
             const temp = condicionesActuales.temperature || 0;
             const feelsLike = condicionesActuales.temperatureApparent || temp;
             const uv = condicionesActuales.uvIndex || 0;
             const cloudCover = condicionesActuales.cloudCover || 0;
-            const wind = (condicionesActuales.windSpeed || 0) * 3.6; // Convertimos m/s a km/h
+            const wind = (condicionesActuales.windSpeed || 0) * 3.6; 
 
-            let reporteCrudo = `Radar Doppler hiperlocal (60 min) - Sector ${cp}\n`;
-            reporteCrudo += `[CONDICIONES BASE] Temp: ${temp.toFixed(1)}°C (Sensación: ${feelsLike.toFixed(1)}°C) | Índice UV: ${uv} | Nubes: ${cloudCover}% | Viento: ${wind.toFixed(1)} km/h\n\n`;
-            reporteCrudo += `--- RASTREO DE PRECIPITACIÓN ---\n`;
+            // Extraemos la probabilidad de precipitación (para detectar nubes de tormenta antes de que llueva)
+            const precipProb = condicionesActuales.precipitationProbability || 0;
 
-            // 2. CONDENSAR LA TELEMETRÍA DE LLUVIA (En bloques de 5 min)
+            let reporteCrudo = `Radar Doppler hiperlocal (60 min) - Coordenadas/Sector: ${ubicacion}\n`;
+            reporteCrudo += `[CONDICIONES BASE] Temp: ${temp.toFixed(1)}°C (Sensación: ${feelsLike.toFixed(1)}°C) | UV: ${uv} | Nubes: ${cloudCover}% | Viento: ${wind.toFixed(1)} km/h | Probabilidad de tormenta/lluvia actual: ${precipProb}%\n\n`;
+            reporteCrudo += `--- RASTREO DE PRECIPITACIÓN (Intensidad en mm/h) ---\n`;
+
+            // 2. CONDENSAR LA TELEMETRÍA DE LLUVIA
             let lluviaDetectada = false;
 
             for (let i = 0; i < minutely.length; i += 5) {
                 const bloque = minutely.slice(i, i + 5);
-                
-                // Promedio de lluvia en el bloque
                 const promedioLluvia = bloque.reduce((acc, curr) => acc + (curr.values.precipitationIntensity || 0), 0) / bloque.length;
                 
                 const fecha = new Date(bloque[0].time);
-                // Convertimos la hora UTC a hora local de CDMX
                 const horaLocal = fecha.toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' });
                 
                 reporteCrudo += `[${horaLocal}] Lluvia: ${promedioLluvia.toFixed(2)} mm/h\n`;
-                
                 if (promedioLluvia > 0) lluviaDetectada = true;
             }
 
-            // 3. EL CEREBRO DEL RADAR (El Prompt con lógica de vestimenta y ventanas)
+            // 3. EL CEREBRO DEL RADAR
             const promptRadar = `
             Eres FaradAI, analizando el radar Doppler hiperlocal para los próximos 60 minutos.
-            El usuario está intentando trasladarse. Tu objetivo es encontrar "ventanas de escape" de lluvia y emitir recomendaciones tácticas de vestimenta basadas en el clima general.
+            El usuario está intentando trasladarse o salir de su edificio. Tu objetivo es encontrar "ventanas de escape" de lluvia y emitir recomendaciones tácticas de vestimenta.
             
             REGLAS DE RECOMENDACIÓN (Aplica solo las necesarias):
             - Si UV >= 6: Recomienda gorra, gafas y bloqueador solar.
-            - Si Sensación térmica > 26°C: Ropa ligera y llevar agua para el traslado.
-            - Si Sensación térmica < 15°C: Ropa abrigadora / chamarra.
-            - Si Viento > 25 km/h: Advertir que usar paraguas será difícil, mejor impermeable.
+            - Si Sensación térmica > 26°C: Ropa ligera y llevar agua.
+            - Si Sensación térmica < 15°C: Ropa abrigadora.
+            - Si Viento > 25 km/h: Sugerir impermeable en vez de paraguas.
+            - Si Probabilidad de tormenta/lluvia actual > 40% y la lluvia marca 0.00: Advierte que hay nubes convectivas formándose y que los truenos son un indicador de tormenta inminente, incluso si el radar aún no marca agua.
             
             REGLAS DE LLUVIA (Ventanas de escape):
-            - 0.00 mm/h = Ventana ideal. Seguro para salir sin ropa de lluvia.
-            - 0.1 a 2.5 mm/h = Llovizna. Ventana viable, requiere paraguas o rompevientos impermeable.
-            - > 2.5 mm/h = Lluvia fuerte. Requiere botas de lluvia, impermeable completo y paraguas. Sugerir resguardarse.
+            - 0.00 mm/h = Ventana ideal.
+            - 0.1 a 2.5 mm/h = Llovizna. Ventana viable, requiere paraguas.
+            - > 2.5 mm/h = Lluvia fuerte. Requiere botas, impermeable y paraguas. Sugerir resguardarse.
             
             INSTRUCCIÓN FINAL:
             ${!lluviaDetectada 
-                ? "No hay lluvia en los próximos 60 minutos. Confírmale que el radar está limpio para moverse y enfócate únicamente en darle las recomendaciones de vestimenta/protección por el sol, temperatura o viento." 
-                : "Se detectó lluvia. Identifica y menciona explícitamente los horarios de las 'ventanas de escape' (donde baje a 0 o llovizna muy ligera). Luego, dale las recomendaciones completas de vestimenta y accesorios (botas, paraguas, ropa) tomando en cuenta también el sol/calor de las 'condiciones base'."
+                ? "Si la probabilidad de tormenta es alta pero la lluvia marca 0, advierte sobre el posible retraso del radar. Si ambos son 0, confírmale que está libre de lluvia y dale recomendaciones de vestimenta base." 
+                : "Identifica los horarios de las 'ventanas de escape'. Luego, dale las recomendaciones de vestimenta y accesorios tomando en cuenta las condiciones base."
             }
-
-            Sé directo, útil y estructurado. Nada de saludos robóticos ni datos técnicos aburridos.
 
             TELEMETRÍA CRUDA:
             ${reporteCrudo}
@@ -101,8 +106,7 @@ module.exports = {
             const result = await model.generateContent(promptRadar);
             const analisisRadar = result.response.text();
 
-            const mensajeDiscord = `🛰️ **Radar de Escape (60 min) - Sector ${cp}**\n\n${analisisRadar}`;
-
+            const mensajeDiscord = `🛰️ **Radar de Escape (60 min)**\n\n${analisisRadar}`;
             await interaction.editReply(mensajeDiscord);
 
         } catch (error) {
