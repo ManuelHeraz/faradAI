@@ -102,8 +102,29 @@ module.exports = {
             ${reporteCrudo}
             `;
 
-            // 4. GENERAR EL INFORME CON GEMINI
-            const result = await model.generateContent(promptRadar);
+            // 4. GENERAR EL INFORME CON GEMINI (Con sistema de reintentos anti-503)
+            let result;
+            let reintentos = 0;
+            const maxReintentos = 3;
+
+            while (reintentos < maxReintentos) {
+                try {
+                    result = await model.generateContent(promptRadar);
+                    break; // Si responde bien, rompemos el bucle y continuamos
+                } catch (errorGemini) {
+                    // Si el error es 503 (saturación) y aún nos quedan intentos
+                    if (errorGemini.status === 503 && reintentos < maxReintentos - 1) {
+                        reintentos++;
+                        console.log(`[Alerta] Servidores de Gemini saturados (503). Reintentando en 3 segundos... (Intento ${reintentos}/${maxReintentos})`);
+                        // Hacemos que el bot "duerma" 3 segundos antes de volver a intentar
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                    } else {
+                        // Si es otro tipo de error grave o se acabaron los intentos, lanzamos el error al catch principal
+                        throw errorGemini;
+                    }
+                }
+            }
+
             const analisisRadar = result.response.text();
 
             const mensajeDiscord = `🛰️ **Radar de Escape (60 min)**\n\n${analisisRadar}`;
