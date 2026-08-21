@@ -5,7 +5,6 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 // Importamos la infraestructura
 const connectDB = require('./src/config/mongo');
-const startServer = require('./src/config/express');
 const iniciarCronPapers = require('./src/jobs/minarPapers');
 const iniciarCronGithub = require('./src/jobs/revisarGithub');
 
@@ -14,7 +13,6 @@ const handleMessageCreate = require('./src/events/messageCreate');
 
 // Encendemos los motores (Base de datos y Servidor Web)
 connectDB();
-startServer();
 
 const client = new Client({
     intents: [

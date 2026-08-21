@@ -41,7 +41,7 @@ module.exports = {
             
             const weatherData = await respuesta.json();
 
-            // 1. CONDENSAR LA TELEMETRÍA (Ahora incluyendo UV y Sensación Térmica)
+            // 1. CONDENSAR LA TELEMETRÍA
             let reporteCrudo = `Ubicación detectada: ${weatherData.location.name}, ${weatherData.location.region}\n`;
             reporteCrudo += `Condiciones Actuales: Temp ${weatherData.current.temp_c}°C (Sensación: ${weatherData.current.feelslike_c}°C), ${weatherData.current.condition.text}. Lluvia: ${weatherData.current.precip_mm} mm/h. Viento: ${weatherData.current.wind_kph} kph. Índice UV: ${weatherData.current.uv}.\n\n`;
 
@@ -51,7 +51,6 @@ module.exports = {
 
             reporteCrudo += `--- TELEMETRÍA DE LAS PRÓXIMAS ${horasAAnalizar} HORAS ---\n`;
             
-            // Extraemos solo el futuro de los arrays de días
             for (const dia of weatherData.forecast.forecastday) {
                 for (const hora of dia.hour) {
                     if (hora.time_epoch >= horaActualEpoch && horasContadas < horasAAnalizar) {
@@ -61,7 +60,7 @@ module.exports = {
                 }
             }
 
-            // 2. EL CEREBRO DEL ASISTENTE (Ajustado para sol, calor y viento)
+            // 2. EL CEREBRO DEL ASISTENTE
             let instruccionEstrategica = "";
             if (modalidad === 'realtime') {
                 instruccionEstrategica = `
@@ -93,8 +92,26 @@ module.exports = {
             ${reporteCrudo}
             `;
 
-            // 3. GENERAR EL INFORME CON GEMINI
-            const result = await model.generateContent(promptClima);
+            // 3. GENERAR EL INFORME CON GEMINI (Blindado con sistema de reintentos)
+            let result;
+            let reintentos = 0;
+            const maxReintentos = 3;
+
+            while (reintentos < maxReintentos) {
+                try {
+                    result = await model.generateContent(promptClima);
+                    break; // Si hay éxito, rompemos el bucle
+                } catch (errorGemini) {
+                    if (errorGemini.status === 503 && reintentos < maxReintentos - 1) {
+                        reintentos++;
+                        console.log(`[Alerta] Servidores de Gemini saturados (503). Reintentando en 3 segundos... (Intento ${reintentos}/${maxReintentos})`);
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                    } else {
+                        throw errorGemini; // Lanza el error al catch principal si es otro código o se acabaron los intentos
+                    }
+                }
+            }
+
             const analisisClima = result.response.text();
 
             const mensajeDiscord = `☁️ **Reporte Meteorológico - Sector ${cp}**\n\n${analisisClima}`;
@@ -112,7 +129,7 @@ module.exports = {
         } catch (error) {
             console.error('Error en el comando /clima:', error);
             if (interaction.deferred) {
-                await interaction.editReply('❌ No se pudo procesar la telemetría del clima en este momento.');
+                await interaction.editReply('❌ No se pudo procesar la telemetría del clima o los servidores de IA no respondieron.');
             }
         }
     }
