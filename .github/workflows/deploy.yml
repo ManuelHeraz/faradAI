@@ -1,0 +1,24 @@
+name: Deploy FaradAI a Google Cloud
+
+# ¿Cuándo se ejecuta esto? Cada vez que hagas un push a la rama main
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Conectando al servidor y actualizando código
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.GCP_HOST }}
+        username: ${{ secrets.GCP_USERNAME }}
+        key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+        script: |
+          cd /home/hernandezdiazjm00/faradAI
+          git pull origin main
+          npm install
+          npx pm2 restart faradai
