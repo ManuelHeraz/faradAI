@@ -86,7 +86,7 @@ app.post('/api/cluster-alert', async (req, res) => {
     res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3008;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`📡 Webhook de FaradAI escuchando alertas del clúster en el puerto ${PORT} abierto al exterior`);
 });
