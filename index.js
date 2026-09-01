@@ -68,7 +68,6 @@ app.use(express.json());
 app.post('/api/cluster-alert', async (req, res) => {
     const { status, filename, errorCode, message } = req.body;
 
-    // PEGA AQUÍ EL ID DE TU CANAL DE DISCORD:
     const channelId = '1529729159964786778'; 
     const channel = client.channels.cache.get(channelId);
 
@@ -77,10 +76,14 @@ app.post('/api/cluster-alert', async (req, res) => {
         return res.status(500).send("Error de canal");
     }
 
+    // TU ID DE USUARIO DE DISCORD (reemplaza los números por los tuyos)
+    const miUserId = '694234188119015597'; 
+
     if (status === 'success') {
-        channel.send(`✅ **Pipeline Finalizado (Xiuhcoatl)**\nSe ejecutó correctamente. Output generado: \`${filename}\``);
+        // AQUÍ AGREGAMOS LA ETIQUETA <@...> AL INICIO DEL MENSAJE
+        channel.send(`<@${miUserId}> ✅ **Pipeline Finalizado (Xiuhcoatl)**\nSe ejecutó correctamente. Output generado: \`${filename}\``);
     } else if (status === 'error') {
-        channel.send(`❌ **Error Crítico en Xiuhcoatl**\nEl proceso \`${filename}\` falló.\n**Exit Code:** \`${errorCode}\`\n**Detalle:** ${message}`);
+        channel.send(`<@${miUserId}> ❌ **Error Crítico en Xiuhcoatl**\nEl proceso \`${filename}\` falló.\n**Exit Code:** \`${errorCode}\`\n**Detalle:** ${message}`);
     }
 
     res.sendStatus(200);
