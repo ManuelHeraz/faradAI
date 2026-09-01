@@ -2,16 +2,15 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const express = require('express'); // <-- Importamos Express
 
 // Importamos la infraestructura
 const connectDB = require('./src/config/mongo');
 const iniciarCronPapers = require('./src/jobs/minarPapers');
 const iniciarCronGithub = require('./src/jobs/revisarGithub');
-
-// Importamos nuestro evento de chat
 const handleMessageCreate = require('./src/events/messageCreate');
 
-// Encendemos los motores (Base de datos y Servidor Web)
+// Encendemos la Base de datos
 connectDB();
 
 const client = new Client({
@@ -22,7 +21,7 @@ const client = new Client({
     ]
 });
 
-// --- LECTOR DE COMANDOS (Command Handler) ---
+// --- LECTOR DE COMANDOS ---
 client.commands = new Collection();
 const comandosParaRegistrar = [];
 const commandsPath = path.join(__dirname, 'src', 'commands');
@@ -37,20 +36,15 @@ for (const file of commandFiles) {
 // --- EVENTOS DEL BOT ---
 client.once('clientReady', async () => {
     console.log(`¡Bot conectado como ${client.user.tag}!`);
-    
-    // Registramos los comandos dinámicamente en Discord
     await client.application.commands.set(comandosParaRegistrar);
     console.log('Slash Commands registrados exitosamente.');
     
-    // Iniciamos los Cron Jobs
     iniciarCronPapers(client);
     iniciarCronGithub(client);
 });
 
-// Enrutador de Slash Commands (/articulo, /actualizaciones)
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
-
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
 
@@ -58,18 +52,44 @@ client.on('interactionCreate', async interaction => {
         await command.execute(interaction);
     } catch (error) {
         console.error(error);
-        if (interaction.deferred || interaction.replied) {
-            await interaction.editReply('Ocurrió un error al ejecutar este comando.');
-        } else {
-            await interaction.reply({ content: 'Ocurrió un error.', ephemeral: true });
-        }
+        const replyPayload = { content: 'Ocurrió un error.', ephemeral: true };
+        interaction.deferred || interaction.replied ? await interaction.editReply('Ocurrió un error.') : await interaction.reply(replyPayload);
     }
 });
 
-// Evento de Chat (Cuando etiquetas al bot)
 client.on('messageCreate', async (message) => {
     await handleMessageCreate(message, client);
 });
 
-// Iniciar sesión
+// --- SERVIDOR WEBHOOK PARA EL CLÚSTER (EXPRESS) ---
+const app = express();
+app.use(express.json());
+
+app.post('/api/cluster-alert', async (req, res) => {
+    const { status, filename, errorCode, message } = req.body;
+
+    // PEGA AQUÍ EL ID DE TU CANAL DE DISCORD:
+    const channelId = '1529729159964786778'; 
+    const channel = client.channels.cache.get(channelId);
+
+    if (!channel) {
+        console.error("No se encontró el canal de Discord. Verifica el ID.");
+        return res.status(500).send("Error de canal");
+    }
+
+    if (status === 'success') {
+        channel.send(`✅ **Pipeline Finalizado (Xiuhcoatl)**\nSe ejecutó correctamente. Output generado: \`${filename}\``);
+    } else if (status === 'error') {
+        channel.send(`❌ **Error Crítico en Xiuhcoatl**\nEl proceso \`${filename}\` falló.\n**Exit Code:** \`${errorCode}\`\n**Detalle:** ${message}`);
+    }
+
+    res.sendStatus(200);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`📡 Webhook de FaradAI escuchando alertas del clúster en el puerto ${PORT}`);
+});
+
+// Iniciar sesión en Discord
 client.login(process.env.DISCORD_TOKEN);
