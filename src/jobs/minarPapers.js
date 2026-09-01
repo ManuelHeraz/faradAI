@@ -17,7 +17,7 @@ const categoriasMinado = [
     },
     {
         nombre: "Bioinformática y Métodos",
-        channelId: "ID_CANAL_METODOS_AQUI", 
+        channelId: "1529712349420851226", 
         query: `(JOURNAL:"Nature Methods" OR JOURNAL:"Briefings in Bioinformatics" OR JOURNAL:"Nucleic Acids Research")`,
         instruccionIA: `
             Actúa como un arquitecto bioinformático discutiendo este artículo en un congreso. Genera un resumen denso y técnico (regla 80/20) estrictamente con este formato:
@@ -29,7 +29,7 @@ const categoriasMinado = [
     },
     {
         nombre: "Filosofía de la Ciencia",
-        channelId: "ID_CANAL_FILOSOFIA_AQUI", 
+        channelId: "1529712349420851227", 
         query: `(JOURNAL:"The Journal of Medicine and Philosophy" OR JOURNAL:"Philosophy of Science" OR JOURNAL:"History and Philosophy of the Life Sciences" OR JOURNAL:"Bioethics")`,
         instruccionIA: `
             Actúa como un epistemólogo debatiendo este artículo en un congreso. Genera un resumen denso y analítico (regla 80/20) estrictamente con este formato:
