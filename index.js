@@ -79,7 +79,7 @@ app.post('/api/cluster-alert', async (req, res) => {
         return res.status(500).send("Error de canal");
     }
 
-    const miUserId = 'TU_ID_DE_USUARIO_AQUI'; // Asegúrate de tener tus números reales aquí
+    const miUserId = '694234188119015597'; // Asegúrate de tener tus números reales aquí
 
     // 2. NUEVA LÓGICA DE ESTADOS
     if (status === 'success') {
