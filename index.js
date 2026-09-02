@@ -68,6 +68,9 @@ app.use(express.json());
 app.post('/api/cluster-alert', async (req, res) => {
     const { status, filename, errorCode, message } = req.body;
 
+    // 1. IMPRIMIR EL JSON RECIBIDO EN GOOGLE CLOUD (Para depuración)
+    console.log("📨 Webhook recibido del clúster:", req.body);
+
     const channelId = '1529729159964786778'; 
     const channel = client.channels.cache.get(channelId);
 
@@ -76,14 +79,19 @@ app.post('/api/cluster-alert', async (req, res) => {
         return res.status(500).send("Error de canal");
     }
 
-    // TU ID DE USUARIO DE DISCORD (reemplaza los números por los tuyos)
-    const miUserId = '694234188119015597'; 
+    const miUserId = 'TU_ID_DE_USUARIO_AQUI'; // Asegúrate de tener tus números reales aquí
 
+    // 2. NUEVA LÓGICA DE ESTADOS
     if (status === 'success') {
-        // AQUÍ AGREGAMOS LA ETIQUETA <@...> AL INICIO DEL MENSAJE
-        channel.send(`<@${miUserId}> ✅ **Pipeline Finalizado (Xiuhcoatl)**\nSe ejecutó correctamente. Output generado: \`${filename}\``);
+        channel.send(`<@${miUserId}> ✅ **Pipeline Finalizado (Xiuhcoatl)**\nSe ejecutó correctamente. Output: \`${filename}\`\n**Mensaje:** ${message}`);
     } else if (status === 'error') {
         channel.send(`<@${miUserId}> ❌ **Error Crítico en Xiuhcoatl**\nEl proceso \`${filename}\` falló.\n**Exit Code:** \`${errorCode}\`\n**Detalle:** ${message}`);
+    } else if (status === 'info') {
+        // NUEVO BLOQUE PARA MENSAJES DE INICIO O MONITOREO
+        channel.send(`ℹ️ **Actualización (Xiuhcoatl)**\n${message}`);
+    } else {
+        // Si mandas un status que no existe, te avisará en lugar de ignorarlo
+        channel.send(`⚠️ **Alerta desconocida (Xiuhcoatl)**\nSe recibió un ping pero el status (\`${status}\`) no está configurado.\n**Mensaje:** ${message}`);
     }
 
     res.sendStatus(200);
